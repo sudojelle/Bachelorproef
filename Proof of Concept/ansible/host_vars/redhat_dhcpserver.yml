@@ -1,0 +1,38 @@
+---
+rhbase_install_packages: 
+   - nano
+
+rhbase_firewall_allow_ports:
+  - 67/udp
+  - 68/udp
+
+
+dhcp_global_authoritative: authoritative
+dhcp_global_default_lease_time: 14400  # 4hrs
+dhcp_global_max_lease_time: 14400 #4hrs
+
+dhcp_global_broadcast_address: 192.168.255.254
+dhcp_global_routers: 172.16.255.254
+
+dhcp_global_domain_name: 'infra.lan'
+dhcp_global_domain_name_servers: 
+  - 172.16.128.1  # Primary DNS (srv001)
+  - 172.16.128.2  # Secondary DNS (srv002)
+
+# Subnet declarations for dynamic IPs (Guests)
+dhcp_subnets:
+  - ip: 172.16.0.0
+    netmask: 255.255.128.0
+    range_begin: 172.16.0.2  # Start of dynamic IP range for guests
+    range_end: 172.16.127.254  # End of dynamic IP range for guests
+    domain_name_servers: 
+      - 172.16.128.1
+      - 172.16.128.2
+    routers: 172.16.255.254  # Default gateway
+    interface: eth1
+
+dhcp_hosts:
+  - name: kali
+    mac: 08:00:27:bb:41:02
+    ip: 172.16.192.20
+

@@ -1,0 +1,33 @@
+
+- name: Linux Playbook
+  hosts: linux
+  gather_facts: true
+  vars:
+    output_dir: "{{ playbook_dir }}/config_inv/{{ inventory_hostname }}-inventory"
+  pre_tasks:
+    - name: Maak bestandslocatie op de controller aan
+      file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: "0755"
+        recurse: yes
+      delegate_to: localhost
+  tasks:
+    - name: Voer RHEL taken uit
+      include_tasks: tasks/redhat-tasks.yml
+      when: ansible_distribution in ['AlmaLinux', 'CentOS', 'RedHat']
+
+    - name: Detecteer RHEL serverrollen
+      include_tasks: tasks/server-roles-redhat.yml
+      when: ansible_distribution in ['AlmaLinux', 'CentOS', 'RedHat']
+
+    - name: Voer Ubuntu taken uit
+      include_tasks: tasks/ubuntu-tasks.yml
+      when: ansible_distribution in ['Ubuntu','Debian','LinuxMint']
+
+    - name: Detecteer Ubuntu serverrollen
+      include_tasks: tasks/server-roles-ubuntu.yml
+      when: ansible_distribution in ['Ubuntu','Debian','LinuxMint']
+
+
+

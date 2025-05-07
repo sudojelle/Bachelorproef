@@ -1,0 +1,475 @@
+# tasks/ubuntu-tasks.yml
+# ── Controleer uitvoermap ──
+- name: Controleer of uitvoermap bestaat
+  ansible.builtin.file:
+    path: "{{ output_dir }}"
+    state: directory
+    mode: '0755'
+
+# ── Maak submappen per categorie aan ──
+- name: Maak hardwaremap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/hardware"
+    state: directory
+
+- name: Maak besturingssysteemmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/besturingssysteem"
+    state: directory
+
+- name: Maak opstartmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/opstart"
+    state: directory
+
+- name: Maak kernel_modulen-map aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/kernel_modulen"
+    state: directory
+
+- name: Maak gebruikersmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/gebruikers"
+    state: directory
+
+- name: Maak groepenmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/groepen"
+    state: directory
+
+- name: Maak pakkettenmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/pakketten"
+    state: directory
+
+- name: Maak netwerkmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/netwerk"
+    state: directory
+
+- name: Maak opslagmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/opslag"
+    state: directory
+
+- name: Maak bestandssystemenmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/bestandssystemen"
+    state: directory
+
+- name: Maak systemdmap aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/systemd"
+    state: directory
+
+# ── Hardwaregegevens verzamelen ──
+- name: Verzamel systeemidentificatie via sysfs
+  ansible.builtin.shell: |
+    echo "Sys Vendor: $(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo N/A)"
+    echo "Product Name: $(cat /sys/class/dmi/id/product_name 2>/dev/null || echo N/A)"
+    echo "Product Version: $(cat /sys/class/dmi/id/product_version 2>/dev/null || echo N/A)"
+    echo "Board Name: $(cat /sys/class/dmi/id/board_name 2>/dev/null || echo N/A)"
+    echo "Board Vendor: $(cat /sys/class/dmi/id/board_vendor 2>/dev/null || echo N/A)"
+    echo "Board Version: $(cat /sys/class/dmi/id/board_version 2>/dev/null || echo N/A)"
+  register: systeem_info
+  changed_when: false
+
+- name: Schrijf systeemidentificatie naar bestand
+  ansible.builtin.copy:
+    content: "{{ systeem_info.stdout }}"
+    dest: "{{ output_dir }}/hardware/systeem_info.txt"
+
+- name: Verzamel CPU-specificaties
+  ansible.builtin.shell: cat /proc/cpuinfo
+  register: cpu_info
+  changed_when: false
+
+- name: Schrijf CPU-specificaties naar bestand
+  ansible.builtin.copy:
+    content: "{{ cpu_info.stdout }}"
+    dest: "{{ output_dir }}/hardware/cpu_info.txt"
+
+- name: Verzamel geheugeninformatie
+  ansible.builtin.shell: cat /proc/meminfo
+  register: geheugen_info
+  changed_when: false
+
+- name: Schrijf geheugeninformatie naar bestand
+  ansible.builtin.copy:
+    content: "{{ geheugen_info.stdout }}"
+    dest: "{{ output_dir }}/hardware/geheugen_info.txt"
+
+- name: Verzamel BIOS-gegevens via sysfs
+  ansible.builtin.shell: |
+    echo "BIOS Vendor: $(cat /sys/class/dmi/id/bios_vendor 2>/dev/null || echo N/A)"
+    echo "BIOS Version: $(cat /sys/class/dmi/id/bios_version 2>/dev/null || echo N/A)"
+    echo "BIOS Date: $(cat /sys/class/dmi/id/bios_date 2>/dev/null || echo N/A)"
+  register: bios_info
+  changed_when: false
+
+- name: Schrijf BIOS-gegevens naar bestand
+  ansible.builtin.copy:
+    content: "{{ bios_info.stdout }}"
+    dest: "{{ output_dir }}/hardware/bios_info.txt"
+
+# ── Besturingssysteeminformatie verzamelen ──
+- name: Maak CSV-header voor besturingssysteeminformatie aan
+  ansible.builtin.copy:
+    content: "hostnaam,OS,distributie,versie,release,kernel\n"
+    dest: "{{ output_dir }}/besturingssysteem/os_info.csv"
+    force: yes
+
+- name: Voeg OS-gegevens toe aan CSV
+  ansible.builtin.lineinfile:
+    path: "{{ output_dir }}/besturingssysteem/os_info.csv"
+    insertafter: EOF
+    line: "{{ ansible_hostname }},{{ ansible_system }},{{ ansible_distribution }},{{ ansible_distribution_version }},{{ ansible_distribution_release }},{{ ansible_kernel }}"
+
+# ── Opstartparameters verzamelen ──
+- name: Haal opstartparameters op
+  ansible.builtin.shell: tr ' ' '\\n' </proc/cmdline
+  register: boot_params
+  changed_when: false
+
+- name: Schrijf opstartparameters naar bestand
+  ansible.builtin.copy:
+    content: "{{ boot_params.stdout }}"
+    dest: "{{ output_dir }}/opstart/opstartparameters.txt"
+
+# ── Kernelmodulen verzamelen ──
+- name: Maak CSV-header voor kernelmodulen aan
+  ansible.builtin.copy:
+    content: "module,grootte,gebruikt_door\n"
+    dest: "{{ output_dir }}/kernel_modulen/kernelmodulen.csv"
+    force: yes
+
+- name: Voeg kernelmodulen toe aan CSV
+  ansible.builtin.shell: |
+    sed -e 's/,/:/g;s/ /,/g;s/:/ /g;s/,Live.*$//g;s/,\([^,]*\)$/ \1/' /proc/modules \
+    >> {{ output_dir }}/kernel_modulen/kernelmodulen.csv
+  args:
+    executable: /bin/bash
+
+# ── Gebruikers en sudo-rechten verzamelen ──
+- name: Controleer of /etc/passwd bestaat
+  ansible.builtin.stat:
+    path: /etc/passwd
+  register: passwd_status
+
+- name: Stop als /etc/passwd ontbreekt of niet leesbaar is
+  ansible.builtin.fail:
+    msg: "/etc/passwd ontbreekt of is niet leesbaar"
+  when: not passwd_status.stat.exists
+
+- name: Genereer CSV met gebruikerslijst
+  ansible.builtin.shell: |
+    printf 'gebruiker,uid,gid,shell,home\n' > {{ output_dir }}/gebruikers/gebruikers.csv
+    cut -d: -f1,3,4,7,6 /etc/passwd | tr ':' ',' | sort -t, -k2n >> {{ output_dir }}/gebruikers/gebruikers.csv
+  args:
+    executable: /bin/bash
+
+- name: Genereer CSV met sudo-rechten per gebruiker
+  ansible.builtin.shell: |
+    printf 'gebruiker,rechten\n' > {{ output_dir }}/gebruikers/sudoers.csv
+    while read -r user; do
+      sudo -U "$user" -l 2>/dev/null \
+        | sed -n '/User/,$p' | tail -n +2 | sed 's/^[[:space:]]*//' \
+        | awk -v u="$user" '{print u","$0}' >> {{ output_dir }}/gebruikers/sudoers.csv
+    done < <(cut -d: -f1 /etc/passwd)
+  args:
+    executable: /bin/bash
+
+# ── Groepen verzamelen ──
+- name: Genereer CSV met groepenlijst
+  ansible.builtin.shell: |
+    printf 'groep,gid,leden\n' > {{ output_dir }}/groepen/groepen.csv
+    cut -d: -f1,3,4 /etc/group \
+      | awk -F: '{gsub(/,/, " ", $4); print $1","$2","$4}' \
+      >> {{ output_dir }}/groepen/groepen.csv
+  args:
+    executable: /bin/bash
+
+# ── Pakketten en repositories verzamelen ──
+- name: Maak CSV-header voor pakkettenlijst aan
+  ansible.builtin.shell: |
+    printf 'pakket,versie,architectuur,bron\n' > {{ output_dir }}/pakketten/pakketten.csv
+    dpkg-query -Wf '${Package},${Version},${Architecture},${Source}\n' \
+      >> {{ output_dir }}/pakketten/pakketten.csv
+  args:
+    executable: /bin/bash
+
+- name: Bewaar APT-bronnen
+  ansible.builtin.shell: |
+    grep -hE '^[[:alnum:]]' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null \
+    | sed 's/^[^:]*://' > {{ output_dir }}/pakketten/apt_bronnen.txt
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+# ── Netwerkinformatie verzamelen ──
+- name: Maak CSV-header voor netwerkinterfaces aan
+  ansible.builtin.copy:
+    content: "interface,ipv4,netmask,broadcast,ipv6,prefix,dhcp,dhcp_server\n"
+    dest: "{{ output_dir }}/netwerk/netwerk_interfaces.csv"
+    force: yes
+
+- name: Voeg netwerkinterfacegegevens toe aan CSV
+  ansible.builtin.shell: |
+    for iface in $(ip -o link show | awk -F': ' '{print $2}'); do
+      ipv4=$(ip -4 addr show "$iface" | awk '/inet /{print $2}' | cut -d/ -f1)
+      mask=$(ip -4 addr show "$iface" | awk '/inet /{print $2}' | cut -d/ -f2)
+      bcast=$(ip -4 addr show "$iface" | awk '/inet /{print $4}')
+      ipv6=$(ip -6 addr show "$iface" scope global | awk '/inet6 /{print $2}' | cut -d/ -f1)
+      prefix=$(ip -6 addr show "$iface" scope global | awk '/inet6 /{print $2}' | cut -d/ -f2)
+      if grep -q "iface $iface inet dhcp" /etc/network/interfaces; then
+        dhcp=true
+        lease="/var/lib/dhcp/dhclient.${iface}.leases"
+        server=$(grep dhcp-server-identifier -m1 "$lease" 2>/dev/null | awk '{print $3}' | sed 's/;//g' || echo N/A)
+      else
+        dhcp=false
+        server=N/A
+      fi
+      printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$iface" "${ipv4:-N/A}" "${mask:-N/A}" "${bcast:-N/A}" \
+        "${ipv6:-N/A}" "${prefix:-N/A}" "$dhcp" "$server"
+    done >> {{ output_dir }}/netwerk/netwerk_interfaces.csv
+  args:
+    executable: /bin/bash
+
+- name: Maak CSV-header voor routingtafel aan
+  ansible.builtin.copy:
+    content: "destination,gateway,genmask,flags,metric,ref,use,interface\n"
+    dest: "{{ output_dir }}/netwerk/netwerk_routing.csv"
+    force: yes
+
+- name: Voeg routingtafel toe aan CSV
+  ansible.builtin.shell: |
+    route -n | tail -n +3 | awk '{print $1","$2","$3","$4","$5","$6","$7","$8}' \
+      >> {{ output_dir }}/netwerk/netwerk_routing.csv
+  args:
+    executable: /bin/bash
+
+- name: Maak CSV-header voor nameservers aan
+  ansible.builtin.copy:
+    content: "nameserver\n"
+    dest: "{{ output_dir }}/netwerk/netwerk_nameservers.csv"
+    force: yes
+
+- name: Voeg nameservers toe aan CSV
+  ansible.builtin.shell: grep '^nameserver' /etc/resolv.conf | awk '{print $2}' \
+    >> {{ output_dir }}/netwerk/netwerk_nameservers.csv
+  args:
+    executable: /bin/bash
+
+- name: Bewaar iptables-regels
+  ansible.builtin.shell: iptables -L -n -v > {{ output_dir }}/netwerk/iptables.txt
+  args:
+    executable: /bin/bash
+
+- name: Bewaar TCP-poorten
+  ansible.builtin.shell: ss -tlpn | sed -E 's/[[:space:]]+/,/g' \
+    > {{ output_dir }}/netwerk/tcp_ports.csv
+  args:
+    executable: /bin/bash
+
+- name: Bewaar UDP-poorten
+  ansible.builtin.shell: ss -ulpn | sed -E 's/[[:space:]]+/,/g' \
+    > {{ output_dir }}/netwerk/udp_ports.csv
+  args:
+    executable: /bin/bash
+
+- name: Controleer of UFW is geïnstalleerd
+  ansible.builtin.command:
+    cmd: which ufw
+  register: ufw_check
+  changed_when: false
+  failed_when: false
+
+- name: Stel fact 'ufw_installed' in
+  ansible.builtin.set_fact:
+    ufw_installed: "{{ ufw_check.rc == 0 }}"
+
+- name: Verzamel alle UFW-gegevens
+  ansible.builtin.shell: |
+    {
+      echo "=== UFW Versie ==="
+      ufw version
+      echo
+      echo "=== UFW Status & Regels ==="
+      ufw status verbose
+      echo
+    } 2>&1
+  register: ufw_all_info
+  changed_when: false
+  when: ufw_installed
+
+- name: Schrijf UFW-gegevens naar bestand
+  ansible.builtin.copy:
+    content: "{{ ufw_all_info.stdout }}"
+    dest: "{{ output_dir }}/netwerk/ufw_info.txt"
+  when: ufw_installed
+
+# ── Opslag en schijven verzamelen ──
+- name: Maak CSV-header voor schijvenlijst aan
+  ansible.builtin.copy:
+    content: "disk,size,bytes,sectors\n"
+    dest: "{{ output_dir }}/opslag/schijven.csv"
+    force: yes
+
+- name: Voeg schijfinformatie toe aan CSV
+  ansible.builtin.shell: |
+    fdisk -l | grep '^Disk /' \
+    | sed -e 's/Disk //;s/:/,/;s/GiB//;s/ bytes//;s/ sectors//;s/ //g' \
+    >> {{ output_dir }}/opslag/schijven.csv
+  args:
+    executable: /bin/bash
+
+- name: Maak CSV-header voor partitieslijst aan
+  ansible.builtin.copy:
+    content: "device,boot,start,end,sectors,size,id,type\n"
+    dest: "{{ output_dir }}/opslag/partities.csv"
+    force: yes
+
+- name: Voeg partitieoverzicht toe aan CSV
+  ansible.builtin.shell: fdisk -l \
+    | grep -E '^/dev/' | tr -s '[:space:]' ',' \
+    >> {{ output_dir }}/opslag/partities.csv
+  args:
+    executable: /bin/bash
+
+# ── Bestandssystemen en koppelpunten verzamelen ──
+- name: Maak CSV-header voor bestandssystemenlijst aan
+  ansible.builtin.copy:
+    content: "bestandssystem,gebruikt\n"
+    dest: "{{ output_dir }}/bestandssystemen/bestandssystemen.csv"
+    force: yes
+
+- name: Voeg bestandssystemen toe aan CSV
+  ansible.builtin.shell: |
+    awk '$1=="nodev"{print $2",false"} $1!="nodev"{print $1",true"}' /proc/filesystems \
+    >> {{ output_dir }}/bestandssystemen/bestandssystemen.csv
+  args:
+    executable: /bin/bash
+
+- name: Maak CSV-header voor koppelpuntenlijst aan
+  ansible.builtin.copy:
+    content: "device,mount_point,fs,options\n"
+    dest: "{{ output_dir }}/bestandssystemen/koppelpunten.csv"
+    force: yes
+
+- name: Voeg koppelpunten toe aan CSV
+  ansible.builtin.shell: |
+    awk '{print $1","$2","$3","$4}' /proc/mounts \
+    >> {{ output_dir }}/bestandssystemen/koppelpunten.csv
+  args:
+    executable: /bin/bash
+
+# ── Systemd-ingeschakelde units verzamelen ──
+- name: Maak CSV-header voor ingeschakelde systemd-units aan
+  ansible.builtin.copy:
+    content: "unit,status,preset\n"
+    dest: "{{ output_dir }}/systemd/ingeschakelde_units.csv"
+    force: yes
+
+- name: Voeg ingeschakelde systemd-units toe aan CSV
+  ansible.builtin.shell: |
+    systemctl list-unit-files --state=enabled --no-legend \
+    | sed -E 's/[[:space:]]+/,/g' \
+    >> {{ output_dir }}/systemd/ingeschakelde_units.csv
+  args:
+    executable: /bin/bash
+
+# ── AppArmor-informatie verzamelen ──
+- name: Maak map 'apparmor' aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/apparmor"
+    state: directory
+    mode: '0755'
+
+- name: Controleer of AppArmor (aa-status) is geïnstalleerd
+  ansible.builtin.command:
+    cmd: which aa-status
+  register: apparmor_check
+  changed_when: false
+  failed_when: false
+
+- name: Stel fact 'apparmor_installed' in
+  ansible.builtin.set_fact:
+    apparmor_installed: "{{ apparmor_check.rc == 0 }}"
+
+- name: Haal AppArmor-status op
+  ansible.builtin.command:
+    cmd: aa-status
+  register: apparmor_status
+  changed_when: false
+  when: apparmor_installed
+
+- name: Schrijf AppArmor-status naar bestand
+  ansible.builtin.copy:
+    content: "{{ apparmor_status.stdout }}"
+    dest: "{{ output_dir }}/apparmor/apparmor_status.txt"
+  when: apparmor_installed
+
+- name: Genereer lijst met AppArmor-profielen
+  ansible.builtin.shell: |
+    ls -1 /etc/apparmor.d || true
+  register: apparmor_profiles
+  changed_when: false
+  when: apparmor_installed
+
+- name: Schrijf AppArmor-profielen naar bestand
+  ansible.builtin.copy:
+    content: "{{ apparmor_profiles.stdout }}"
+    dest: "{{ output_dir }}/apparmor/profielen.txt"
+  when: apparmor_installed
+
+# ── Cronjobs verzamelen ──
+- name: Maak map 'cronjobs' aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/cronjobs"
+    state: directory
+    mode: '0755'
+
+- name: Verzamelen van alle cronjobs
+  ansible.builtin.shell: |
+    crontab -l 2>/dev/null
+    cat /etc/crontab 2>/dev/null
+    cat /etc/cron.d/* 2>/dev/null || true
+  register: cronjobs_output
+  changed_when: false
+
+- name: Schrijf cronjobs naar bestand
+  ansible.builtin.copy:
+    content: "{{ cronjobs_output.stdout }}"
+    dest: "{{ output_dir }}/cronjobs/cronjobs.txt"
+  when: cronjobs_output.stdout != ""
+
+- name: Schrijf melding 'geen cronjobs'
+  ansible.builtin.copy:
+    content: "Geen cronjobs gevonden"
+    dest: "{{ output_dir }}/cronjobs/cronjobs.txt"
+  when: cronjobs_output.stdout == ""
+
+# ── Systemd-timers verzamelen ──
+- name: Maak map 'systemd/timers' aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/systemd/timers"
+    state: directory
+    mode: '0755'
+
+- name: Verzamelen van alle systemd-timers
+  ansible.builtin.shell: systemctl list-timers --all --no-legend
+  register: timers_output
+  changed_when: false
+
+- name: Schrijf systemd-timers naar bestand
+  ansible.builtin.copy:
+    content: "{{ timers_output.stdout }}"
+    dest: "{{ output_dir }}/systemd/timers/systemd_timers.txt"
+  when: timers_output.stdout != ""
+
+- name: Schrijf melding 'geen systemd-timers'
+  ansible.builtin.copy:
+    content: "Geen systemd timers gevonden"
+    dest: "{{ output_dir }}/systemd/timers/systemd_timers.txt"
+  when: timers_output.stdout == ""

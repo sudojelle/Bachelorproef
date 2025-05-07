@@ -1,0 +1,256 @@
+# tasks/server_roles_redhat.yml
+---
+
+# ── Maak map voor rollen aan ──
+- name: Maak map 'roles' aan
+  ansible.builtin.file:
+    path: "{{ output_dir }}/roles"
+    state: directory
+    mode: '0755'
+
+# ── Detecteer actieve services en bepaal types ──
+- name: Detecteer DHCP-, web- en DNS-service
+  ansible.builtin.shell: |
+    # DHCP?
+    if systemctl is-active --quiet dhcpd.service 2>/dev/null; then
+      dhcp="dhcpd"
+    else
+      dhcp="none"
+    fi
+
+    # Webserver?
+    if systemctl is-active --quiet httpd.service 2>/dev/null; then
+      web="httpd"
+    elif systemctl is-active --quiet nginx.service 2>/dev/null; then
+      web="nginx"
+    else
+      web_proc=$(ss -tlpn 2>/dev/null | awk '/LISTEN/ {
+        if ($0 ~ /httpd/)   print "httpd";
+        else if ($0 ~ /nginx/) print "nginx";
+      }' | head -n1)
+      web="${web_proc:-none}"
+    fi
+
+    # DNS?
+    if systemctl is-active --quiet named.service 2>/dev/null; then
+      dns="named"
+    else
+      dns="none"
+    fi
+
+    echo "${dhcp},${web},${dns}"
+  args:
+    executable: /bin/bash
+  register: detected_services
+  changed_when: false
+
+# ── Stel rolvariabelen in ──
+- name: Stel rolvariabelen in
+  ansible.builtin.set_fact:
+    dhcp_service: "{{ detected_services.stdout.split(',')[0] }}"
+    web_service:  "{{ detected_services.stdout.split(',')[1] }}"
+    dns_service:  "{{ detected_services.stdout.split(',')[2] }}"
+
+# ── Schrijf overzicht van services naar bestand ──
+- name: Schrijf roles.txt
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/roles.txt"
+    content: |
+      dhcp_service: {{ dhcp_service }}
+      web_service:  {{ web_service }}
+      dns_service:  {{ dns_service }}
+
+################################################################################
+# DHCP-serverinventaris (Red Hat-paden)
+################################################################################
+
+- name: Haal globale DHCP-opties op
+  ansible.builtin.shell: |
+    grep -E '^(authoritative|default-lease-time|max-lease-time|option domain-name|option domain-name-servers|option routers|ddns-update-style)' /etc/dhcp/dhcpd.conf || echo 'None found'
+  register: dhcp_global
+  when: dhcp_service != 'none'
+
+- name: Schrijf globale DHCP-opties
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dhcp_global_options.txt"
+    content: "{{ dhcp_global.stdout }}"
+  when: dhcp_service != 'none'
+
+- name: Haal DHCP-subnets op
+  ansible.builtin.shell: |
+    awk '/^subnet /,/^}/' /etc/dhcp/dhcpd.conf || echo 'None found'
+  register: dhcp_subnets
+  when: dhcp_service != 'none'
+
+- name: Schrijf DHCP-subnets
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dhcp_subnets.txt"
+    content: "{{ dhcp_subnets.stdout }}"
+  when: dhcp_service != 'none'
+
+- name: Haal DHCP-pools op
+  ansible.builtin.shell: |
+    awk '
+      /^\s*pool\s*\{/ { inblock=1 }
+      inblock { print }
+      inblock && /^\s*\}/ { inblock=0 }
+    ' /etc/dhcp/dhcpd.conf || echo 'None found'
+  register: dhcp_pools
+  when: dhcp_service != 'none'
+
+- name: Schrijf DHCP-pools
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dhcp_pools.txt"
+    content: "{{ dhcp_pools.stdout }}"
+  when: dhcp_service != 'none'
+
+- name: Haal recente DHCP-leases op
+  ansible.builtin.shell: |
+    tail -n 50 /var/lib/dhcpd/dhcpd.leases || echo 'None found'
+  register: dhcp_leases
+  when: dhcp_service != 'none'
+
+- name: Schrijf DHCP-leases
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dhcp_leases.txt"
+    content: "{{ dhcp_leases.stdout }}"
+  when: dhcp_service != 'none'
+
+################################################################################
+# Webserverinventaris (Red Hat-paden, Apache & Nginx)
+################################################################################
+
+- name: Haal luisterpoorten webserver op
+  ansible.builtin.shell: |
+    ss -tlpn | grep -E 'httpd|nginx' || echo 'None found'
+  register: web_ports
+  when: web_service != 'none'
+
+- name: Schrijf web-luisterpoorten
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/web_ports.txt"
+    content: "{{ web_ports.stdout }}"
+  when: web_service != 'none'
+
+- name: Haal webserver-modules op
+  ansible.builtin.shell: |
+    if [ "{{ web_service }}" = "httpd" ]; then
+      httpd -M || echo 'None found'
+    elif [ "{{ web_service }}" = "nginx" ]; then
+      nginx -V 2>&1 || echo 'None found'
+    else
+      echo 'None found'
+    fi
+  args:
+    executable: /bin/bash
+  register: web_modules
+  when: web_service != 'none'
+
+- name: Schrijf webserver-modules
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/web_modules.txt"
+    content: "{{ web_modules.stdout }}"
+  when: web_service != 'none'
+
+- name: Haal webserver-logpaden op
+  ansible.builtin.shell: |
+    if [ "{{ web_service }}" = "httpd" ]; then
+      grep -R '^\s*(ErrorLog|CustomLog)' /etc/httpd || echo 'None found'
+    elif [ "{{ web_service }}" = "nginx" ]; then
+      grep -R '^\s*(error_log|access_log)' /etc/nginx || echo 'None found'
+    else
+      echo 'None found'
+    fi
+  args:
+    executable: /bin/bash
+  register: web_logs
+  when: web_service != 'none'
+
+- name: Schrijf webserver-logpaden
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/web_logs.txt"
+    content: "{{ web_logs.stdout }}"
+  when: web_service != 'none'
+
+################################################################################
+# DNS-serverinventaris (Red Hat-paden)
+################################################################################
+
+- name: Stel DNS-configuratiepaden in
+  ansible.builtin.set_fact:
+    dns_conf:    "/etc/named.conf"
+    dns_cfg_dir: "/etc"
+    dns_zone_dir: "/var/named"
+
+- name: Haal volledige DNS-zoneblokken op
+  ansible.builtin.shell: |
+    named-checkconf -p 2>/dev/null | awk '
+      /^\s*zone[[:space:]]/ { if (block) print ""; block=1 }
+      block { print }
+      block && /^\s*};/ { print ""; block=0 }
+    ' || echo 'None found'
+  register: dns_zone_blocks
+  when: dns_service != 'none'
+
+- name: Schrijf DNS-zoneblokken
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dns_zone_blocks.txt"
+    content: "{{ dns_zone_blocks.stdout }}"
+  when: dns_service != 'none'
+
+- name: Haal DNS-ACL’s en opties op
+  ansible.builtin.shell: |
+    grep -hE 'allow-(query|transfer|recursion|update-|notify)|listen-on' \
+      {{ dns_conf }} {{ dns_cfg_dir }}/named.conf* 2>/dev/null || echo 'None found'
+  register: dns_acls
+  when: dns_service != 'none'
+
+- name: Schrijf DNS-ACL’s en opties
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dns_acls.txt"
+    content: "{{ dns_acls.stdout }}"
+  when: dns_service != 'none'
+
+- name: Haal DNS-logconfiguratie op
+  ansible.builtin.shell: |
+    grep -hE 'channel|category' \
+      {{ dns_conf }} {{ dns_cfg_dir }}/named.conf* 2>/dev/null || echo 'None found'
+  register: dns_logging
+  when: dns_service != 'none'
+
+- name: Schrijf DNS-logconfiguratie
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dns_logging.txt"
+    content: "{{ dns_logging.stdout }}"
+  when: dns_service != 'none'
+
+- name: Haal recente DNS-logregels op
+  ansible.builtin.shell: |
+    tail -n 50 /var/log/messages 2>/dev/null | grep -i named || echo 'None found'
+  register: dns_logs
+  when: dns_service != 'none'
+
+- name: Schrijf recente DNS-logregels
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dns_recent_logs.txt"
+    content: "{{ dns_logs.stdout }}"
+  when: dns_service != 'none'
+
+- name: Haal volledige DNS-options-blok op
+  ansible.builtin.shell: |
+    named-checkconf -p 2>/dev/null | awk '
+      /^\s*options[[:space:]]*\{/ { inblk=1; lvl=1; print; next }
+      inblk {
+        line=$0; print line
+        o=gsub(/\{/,"{",line); c=gsub(/\}/,"}",line); lvl+=o-c
+        if(lvl==0) inblk=0
+      }
+    ' || echo 'None found'
+  register: dns_options_block
+  when: dns_service != 'none'
+
+- name: Schrijf DNS-options-blok
+  ansible.builtin.copy:
+    dest: "{{ output_dir }}/roles/dns_options.txt"
+    content: "{{ dns_options_block.stdout }}"
+  when: dns_service != 'none'

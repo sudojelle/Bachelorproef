@@ -1,0 +1,19 @@
+rhbase_install_packages: 
+   - bash-completion
+   - vim-enhanced
+   - bind-utils
+   - git
+   - nano
+   - setroubleshoot-server
+   - tree
+   - wget
+   - nginx
+
+
+rhbase_start_services:
+   - nginx
+
+rhbase_firewall_allow_services:
+   - http
+   - https
+

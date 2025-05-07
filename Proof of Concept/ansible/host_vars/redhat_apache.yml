@@ -1,0 +1,31 @@
+# ansible/group_vars/srv100.yml
+---
+rhbase_install_packages: 
+   - bash-completion
+   - vim-enhanced
+   - bind-utils
+   - git
+   - nano
+   - setroubleshoot-server
+   - tree
+   - wget
+   - httpd
+   - mariadb-server
+   - php
+   - php-mysqlnd
+   - python3-mysqlclient
+
+
+rhbase_start_services:
+   - httpd
+   - mariadb
+
+rhbase_firewall_allow_services:
+   - http
+   - https
+
+rhbase_selinux_booleans:
+   - httpd_can_network_connect_db
+
+
+

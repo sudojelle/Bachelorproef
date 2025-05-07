@@ -1,0 +1,19 @@
+# ansible/group_vars/servers.yml
+---
+rhbase_repositories: 
+  - epel-release
+rhbase_install_packages: 
+   - bash-completion
+   - vim-enhanced
+   - bind-utils
+   - git
+   - nano
+   - setroubleshoot-server
+   - tree
+   - wget
+rhbase_users:
+   - name: jelle
+     groups:
+       - wheel
+     ssh_key: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCywgv8NFDXUJE0xHaVGrdMTVnsUbQAo2MIOtFrqq2WH/19VJCaeoUwYDBRxCzvpT6EbkzMWc23+BXNmGCfgUc5QHVHcsTsNow5t4G8Rpatw0qbFZ1Za2EJ0FySMhgREbDWNWNWKYAYEN9XVNY/SNEY++Q9G9uIXfaVseaZ9sJ7r1R6ISxdQtdRbT0KNtdpx5fU0z9SrF5kLYyPe2D7mW4ZymNz+TBu3XUBTSmA5Bah8ckdhUjsMEvhZ2asWpbHdYwq6r3x4gZSqMKN/hpfXnfV0vGoDe+HHhp++cMuuwc4C0b42yR3aI/KflSS8uqalRf+PbjxYVsGdeZHhAy2v/dgUPJzPkPxF/WhJCkVpomTNYMOgqueu5Ra1MnvqV3St6HtwflvGI0gD0ksO3QSI9GNb8gM4xbKqYhw+q9HK4RnpIUouHSNUR84lsC2R6a5Jvnmb0dRGLT3c3xdcGS68TsB2xSF8NkFcHAJ+A/DH0GYeAzzvU5GQzYnSI33QCcJEFE= Zephyrus G15@Zephyrus-G15'
+

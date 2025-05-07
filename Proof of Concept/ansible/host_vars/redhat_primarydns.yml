@@ -1,0 +1,66 @@
+---
+rhbase_install_packages: 
+   - nano
+
+rhbase_firewall_allow_ports:
+  - 53/tcp
+  - 53/udp
+
+rhbase_selinux_booleans:
+  - named_write_master_zones
+  - named_tcp_bind_http_port
+
+bind_allow_query: ['any']
+bind_recursion: true
+bind_allow_recursion: ['any']
+bind_listen_ipv4: ['any']
+bind_forward_only: true
+bind_forwarders:
+  - 10.0.2.3
+  - 8.8.8.8
+bind_dnssec_enable: false
+bind_dnssec_validation: false
+bind_query_log: 'data/query.log'
+
+bind_zones:
+  - name: "infra.lan"
+    primaries:
+      - 172.16.128.1
+    name_servers:
+      - srv001
+      - srv002
+    networks:
+      - '172.16'
+    hosts:
+      - name: "srv001"
+        ip: 172.16.128.1
+        aliases:
+          - ns1
+      - name: "srv100"
+        ip: 172.16.128.100
+        aliases:
+          - www
+      - name: "srv002"
+        ip: 172.16.128.2
+        aliases:
+          - ns2
+      - name: "srv003"
+        ip: 172.16.128.3
+        aliases:
+          - dhcp
+      - name: "control"
+        ip: 172.16.128.253
+      - name: '@'
+        ip: 172.16.128.100
+        aliases:
+          - ns
+    forwarders:
+      - 8.8.8.8
+      - 8.8.4.4
+
+
+
+
+
+
+

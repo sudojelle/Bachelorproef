@@ -1,0 +1,90 @@
+# vagrant_hosts.yml
+#
+# List of hosts to be created by Vagrant. For more information about the
+# possible settings, see the documentation at
+# <https://github.com/bertvv/ansible-skeleton>
+
+# Example of a more elaborate host definition
+# - name: srv002
+#   box: bento/fedora-28
+#   memory: 2048
+#   cpus: 2
+#   ip: 172.20.0.10
+#   netmask: 255.255.0.0
+#   mac: '13:37:de:ad:be:ef'
+#   playbook: srv002.yml
+#   forwarded_ports:
+#     - host: 8080
+#       guest: 80
+#     - host: 8443
+#       guest: 443
+#   synced_folders:
+#     - src: test
+#       dest: /tmp/test
+#     - src: www
+#       dest: /var/www/html
+#       options:
+#         :create: true
+#         :owner: root
+#         :group: root
+#         :mount_options: ['dmode=0755', 'fmode=0644']
+
+---
+- name: Controller
+  ip: 172.16.128.253
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+
+- name: RedHatApache # Apache Webserver 
+  ip: 172.16.128.100
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+- name: RedHatNginx # Nginx Webserver 
+  ip: 172.16.128.101
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+- name: RedHatPrimaryDNS # Primary DNS
+  ip: 172.16.128.1
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+- name: RedHatSecondaryDNS # Secondary DNS
+  ip: 172.16.128.2
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+- name: RedHatDHCPServer # DHCP
+  ip: 172.16.128.3
+  netmask: 255.255.0.0
+  box: bento/almalinux-9
+
+
+- name: UbuntuApache # Apache Webserver
+  ip: 172.16.128.102
+  netmask: 255.255.0.0
+  box: gusztavvargadr/ubuntu-server 
+
+- name: UbuntuNginx # Nginx Webserver
+  ip: 172.16.128.103
+  netmask: 255.255.0.0
+  box: gusztavvargadr/ubuntu-server 
+
+- name: UbuntuDNS # DHCP
+  ip: 172.16.128.6
+  netmask: 255.255.0.0
+  box: gusztavvargadr/ubuntu-server 
+
+- name: UbuntuDHCPServer # DHCP
+  ip: 172.16.128.7
+  netmask: 255.255.0.0
+  box: gusztavvargadr/ubuntu-server 
+
+# - name: WindowsServer # Windows Server
+#   ip: 172.16.128.4
+#   netmask: 255.255.0.0
+#   box: gusztavvargadr/windows-server-2022-standard-core
+
+

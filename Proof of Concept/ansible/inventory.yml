@@ -1,0 +1,47 @@
+---
+linux:
+  vars: 
+    ansible_user: vagrant 
+    ansible_ssh_password: vagrant 
+    ansible_become: true 
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  hosts:
+    control:
+      ansible_host: 172.16.128.253
+
+
+    redhat_apache: 
+      ansible_host: 172.16.128.100
+    redhat_nginx: 
+      ansible_host: 172.16.128.101
+    redhat_primarydns:
+      ansible_host: 172.16.128.1
+    redhat_secondarydns:
+      ansible_host: 172.16.128.2
+    redhat_dhcpserver:
+      ansible_host: 172.16.128.3
+
+
+    ubuntu_apache:
+      ansible_host: 172.16.128.102
+    ubuntu_nginx:
+      ansible_host: 172.16.128.103
+    ubuntu_dns:
+      ansible_host: 172.16.128.6
+    ubuntu_dhcpserver:
+      ansible_host: 172.16.128.7
+    
+
+# windows:
+#   vars:
+#     ansible_connection: ssh
+#     ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+#     ansible_shell_type: powershell
+#     ansible_shell_executable: powershell.exe
+#     ansible_user: vagrant
+#   hosts:
+#     windowsserver:
+#       ansible_host: 172.16.128.4
+
+
+

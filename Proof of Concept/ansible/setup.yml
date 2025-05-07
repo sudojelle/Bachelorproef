@@ -1,0 +1,430 @@
+---
+- name: Configureer Red Hat Apache-hosts
+  hosts: redhat_apache
+  roles:
+    - bertvv.rh-base
+    - bertvv.httpd
+
+- name: Configureer Red Hat NGINX-hosts
+  hosts: redhat_nginx
+  roles:
+    - bertvv.rh-base
+
+- name: Configureer controller
+  hosts: control
+  roles:
+    - bertvv.rh-base
+
+- name: Configureer primaire DNS-server
+  hosts: redhat_primarydns
+  roles:
+    - bertvv.rh-base
+    - bertvv.bind
+
+- name: Configureer secundaire DNS-server
+  hosts: redhat_secondarydns
+  roles:
+    - bertvv.rh-base
+    - bertvv.bind
+
+- name: Configureer DHCP-server
+  hosts: redhat_dhcpserver
+  roles:
+    - bertvv.rh-base
+    - bertvv.dhcp
+
+- name: Installeer en configureer Ubuntu DNS-server
+  hosts: ubuntu_dns
+  become: true
+  vars:
+    dns_zone_name: example.com
+    zone_file_path: "/etc/bind/db.{{ dns_zone_name }}"
+    forwarders:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  tasks:
+    - name: Werk apt-cache bij
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Schakel UFW in
+      ansible.builtin.ufw:
+        state: enabled
+
+    - name: Sta DNS TCP-poort 53 toe via UFW
+      ansible.builtin.ufw:
+        rule: allow
+        port: 53
+        proto: tcp
+
+    - name: Sta DNS UDP-poort 53 toe via UFW
+      ansible.builtin.ufw:
+        rule: allow
+        port: 53
+        proto: udp
+
+    - name: Sta SSH toe via UFW
+      ansible.builtin.ufw:
+        rule: allow
+        port: 22
+
+    - name: Installeer BIND9 en utils
+      ansible.builtin.apt:
+        name:
+          - bind9
+          - bind9utils
+        state: present
+
+    - name: Zorg dat cachemap bestaat
+      ansible.builtin.file:
+        path: /var/cache/bind
+        state: directory
+        owner: bind
+        group: bind
+        mode: '0755'
+
+    - name: Plaats named.conf zonder includes
+      ansible.builtin.copy:
+        dest: /etc/bind/named.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          // ANSIBLE MANAGED – hoofdbestand BIND9
+          options {
+              directory "/var/cache/bind";
+              recursion yes;
+              allow-query { any; };
+              forwarders {
+          {% for ip in forwarders %}
+                  {{ ip }};
+          {% endfor %}
+              };
+          };
+
+          zone "{{ dns_zone_name }}" {
+              type master;
+              file "{{ zone_file_path }}";
+          };
+      notify: Herstart bind9
+
+    - name: Plaats zonebestand voor {{ dns_zone_name }}
+      ansible.builtin.copy:
+        dest: "{{ zone_file_path }}"
+        owner: root
+        group: bind
+        mode: '0644'
+        content: |
+          $TTL 604800
+          @   IN SOA ns1.{{ dns_zone_name }}. admin.{{ dns_zone_name }}. (
+                    1        ; Serial
+                    604800   ; Refresh
+                    86400    ; Retry
+                    2419200  ; Expire
+                    604800 ) ; Negative Cache TTL
+          ;
+          @   IN NS  ns1.{{ dns_zone_name }}.
+          ns1 IN A   127.0.0.1
+      notify: Herstart bind9
+
+    - name: Controleer BIND-configuratie
+      ansible.builtin.command: named-checkconf
+      register: conf_check
+      changed_when: false
+      failed_when: conf_check.rc != 0
+
+    - name: Controleer zone {{ dns_zone_name }}
+      ansible.builtin.command: "named-checkzone {{ dns_zone_name }} {{ zone_file_path }}"
+      register: zone_check
+      changed_when: false
+      failed_when: zone_check.rc != 0
+
+    - name: Zorg dat bind9 draait en ingeschakeld is
+      ansible.builtin.service:
+        name: bind9
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Herstart bind9
+      ansible.builtin.service:
+        name: bind9
+        state: restarted
+
+- name: Voorzie Ubuntu DHCP-server
+  hosts: ubuntu_dhcpserver
+  become: true
+  vars:
+    dhcp_interface: eth1
+    dhcp_interface_ip: "172.16.128.3/24"
+    dhcp_gateway: "172.16.128.1"
+    dhcp_nameservers:
+      - "8.8.8.8"
+      - "8.8.4.4"
+    dhcp_subnet: "172.16.128.0"
+    dhcp_netmask: "255.255.255.0"
+    dhcp_range_start: "172.16.128.10"
+    dhcp_range_end: "172.16.128.100"
+    dhcp_routers: "{{ dhcp_gateway }}"
+    dhcp_domain_name: "example.local"
+    dhcp_dns_servers: "{{ dhcp_nameservers }}"
+    dhcp_default_lease_time: 600
+    dhcp_max_lease_time: 7200
+
+  tasks:
+    - name: Werk APT-cache bij
+      apt:
+        update_cache: yes
+
+    - name: Installeer vereiste pakketten
+      apt:
+        name:
+          - isc-dhcp-server
+          - netplan.io
+        state: present
+
+    - name: Schrijf Netplan-configuratie voor {{ dhcp_interface }}
+      copy:
+        dest: /etc/netplan/01-dhcp-server.yaml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          network:
+            version: 2
+            renderer: networkd
+            ethernets:
+              {{ dhcp_interface }}:
+                dhcp4: no
+                addresses: [ "{{ dhcp_interface_ip }}" ]
+                gateway4: "{{ dhcp_gateway }}"
+                nameservers:
+                  addresses: [{% for ns in dhcp_nameservers %}"{{ ns }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+
+    - name: Pas Netplan toe
+      command: netplan apply
+
+    - name: Zorg dat ISC DHCP alleen luistert op {{ dhcp_interface }}
+      lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="{{ dhcp_interface }}"'
+        create: yes
+
+    - name: Plaats dhcpd.conf met subnetdefinitie
+      copy:
+        dest: /etc/dhcp/dhcpd.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # DHCP-server configuratie
+          option domain-name "{{ dhcp_domain_name }}";
+          option domain-name-servers {% for dns in dhcp_dns_servers %}{{ dns }}{% if not loop.last %}, {% endif %}{% endfor %};
+
+          default-lease-time {{ dhcp_default_lease_time }};
+          max-lease-time {{ dhcp_max_lease_time }};
+
+          authoritative;
+
+          subnet {{ dhcp_subnet }} netmask {{ dhcp_netmask }} {
+            range {{ dhcp_range_start }} {{ dhcp_range_end }};
+            option routers {{ dhcp_routers }};
+          }
+
+    - name: Herstart en schakel ISC-DHCP-server in
+      service:
+        name: isc-dhcp-server
+        state: restarted
+        enabled: yes
+
+- name: Configureer Ubuntu-host als Apache-webserver
+  hosts: ubuntu_apache
+  become: true
+  vars:
+    net_iface: eth0
+
+  tasks:
+    - name: Werk APT-cache bij
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Installeer Apache en prerequisites
+      apt:
+        name:
+          - apache2
+          - python3
+          - ufw
+        state: present
+
+    - name: Schakel en start Apache-service
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Sta HTTP (80) en HTTPS (443) toe via UFW
+      ufw:
+        rule: allow
+        name: 'Apache Full'
+
+    - name: Sta SSH (22) toe via UFW
+      ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: Schakel UFW in
+      ansible.builtin.ufw:
+        state: enabled
+
+    - name: Configureer Netplan voor DHCP op {{ net_iface }}
+      copy:
+        dest: /etc/netplan/01-netcfg.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              {{ net_iface }}:
+                dhcp4: true
+      notify: Pas Netplan toe
+
+  handlers:
+    - name: Pas Netplan toe
+      command: netplan apply
+
+- name: Configureer Ubuntu-host als NGINX-webserver
+  hosts: ubuntu_nginx
+  become: true
+  vars:
+    allowed_ports:
+      - 22  # SSH
+      - 80  # HTTP
+      - 443 # HTTPS
+
+  tasks:
+    - name: Werk apt-cache bij
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Installeer NGINX en UFW
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - ufw
+        state: present
+
+    - name: Schakel en start NGINX-service
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Sta SSH, HTTP en HTTPS toe via UFW
+      ansible.builtin.ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop: "{{ allowed_ports }}"
+
+    - name: Schakel UFW in
+      ansible.builtin.ufw:
+        state: enabled
+
+- name: Installeer test-cronjobs en systemd-timers
+  hosts: all
+  become: true
+  vars:
+    cron_log: /tmp/cron_test.log
+    timer_log: /tmp/timer_test.log
+
+  tasks:
+    - name: Zorg dat cron-logbestand bestaat
+      ansible.builtin.file:
+        path: "{{ cron_log }}"
+        state: touch
+        mode: '0644'
+
+    - name: Maak test-cronjob echo elke minuut
+      ansible.builtin.cron:
+        name: "test_echo_every_minute"
+        minute: "*"
+        job: "/usr/bin/echo 'cronjob ran at $(date)' >> {{ cron_log }}"
+
+    - name: Maak test-cronjob dagelijkse schoonmaak om middernacht
+      ansible.builtin.cron:
+        name: "test_daily_cleanup"
+        hour: "0"
+        minute: "0"
+        job: "/usr/bin/echo 'daily cleanup at $(date)' >> {{ cron_log }}"
+
+    - name: Maak systemd-service voor echo-timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/test-echo.service
+        content: |
+          [Unit]
+          Description=Test echo service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/bash -c "echo 'timer ran at $(date)' >> {{ timer_log }}"
+        mode: '0644'
+
+    - name: Maak systemd-timer voor echo-timer (elke minuut)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/test-echo.timer
+        content: |
+          [Unit]
+          Description=Run test-echo.service every minute
+
+          [Timer]
+          OnCalendar=*:0/1
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        mode: '0644'
+
+    - name: Maak systemd-service voor cleanup-timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/test-cleanup.service
+        content: |
+          [Unit]
+          Description=Test cleanup service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/bash -c "echo 'cleanup timer at $(date)' >> {{ timer_log }}"
+        mode: '0644'
+
+    - name: Maak systemd-timer voor cleanup-timer (dagelijks middernacht)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/test-cleanup.timer
+        content: |
+          [Unit]
+          Description=Run test-cleanup.service daily at midnight
+
+          [Timer]
+          OnCalendar=*-*-* 00:00:00
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        mode: '0644'
+
+    - name: Herlaad systemd-daemon
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Schakel en start test-echo.timer
+      ansible.builtin.systemd:
+        name: test-echo.timer
+        enabled: yes
+        state: started
+
+    - name: Schakel en start test-cleanup.timer
+      ansible.builtin.systemd:
+        name: test-cleanup.timer
+        enabled: yes
+        state: started

@@ -1,0 +1,1 @@
+{"rsync":{"/vagrant":{"type":"rsync","owner":"vyos","group":"users","mount_options":["dmode=775,fmode=775"],"guestpath":"/vagrant","hostpath":"C:/Users/Zephyrus G15/OneDrive/Desktop/Lesmateriaal/Jaar 3/Infrastructure Automation/infra-24-25-sudojelle/vmlab","disabled":false,"__vagrantfile":true}}}
